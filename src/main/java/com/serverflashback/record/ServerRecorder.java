@@ -45,6 +45,7 @@ import net.minecraft.sounds.SoundSource;
 //#if MC >= 12002
 import net.minecraft.tags.TagNetworkSerialization;
 //#endif
+import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -66,6 +67,16 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.PlayerTeam;
+//#if MC >= 12005
+import net.minecraft.world.scores.DisplaySlot;
+import net.minecraft.world.scores.PlayerScoreEntry;
+import net.minecraft.network.chat.numbers.NumberFormat;
+//#else
+//$$ import net.minecraft.world.scores.Score;
+//$$ import net.minecraft.server.ServerScoreboard;
+//#endif
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -108,6 +119,7 @@ public class ServerRecorder {
     }
 
     private final Map<Integer, Position> lastPositions = new HashMap<>();
+    private final Set<Integer> trackedEntityIds = new HashSet<>();
 
     private final UUID virtualPlayerUUID = UUID.randomUUID();
     private static final int VIRTUAL_PLAYER_ID = Integer.MAX_VALUE - 1;
@@ -204,6 +216,67 @@ public class ServerRecorder {
 //$$     }
 //$$ }
 //#endif
+
+    public void queueEntitySpawn(Entity entity) {
+        if (closeForWriting || isPaused) return;
+        if (PacketHelper.shouldIgnoreEntity(entity)) return;
+
+        trackedEntityIds.add(entity.getId());
+        pendingGamePackets.add(PacketHelper.createAddEntity(entity));
+
+//#if MC >= 11904
+        List<SynchedEntityData.DataValue<?>> nonDefault = entity.getEntityData().getNonDefaultValues();
+        if (nonDefault != null && !nonDefault.isEmpty()) {
+            pendingGamePackets.add(new ClientboundSetEntityDataPacket(entity.getId(), nonDefault));
+        }
+//#else
+//$$ List<SynchedEntityData.DataItem<?>> allData = entity.getEntityData().getAll();
+//$$ if (allData != null && !allData.isEmpty()) {
+//$$     pendingGamePackets.add(new ClientboundSetEntityDataPacket(entity.getId(), entity.getEntityData(), false));
+//$$ }
+//#endif
+
+        if (entity instanceof LivingEntity living) {
+            Collection<AttributeInstance> syncable = living.getAttributes().getSyncableAttributes();
+            if (!syncable.isEmpty()) {
+                pendingGamePackets.add(new ClientboundUpdateAttributesPacket(entity.getId(), syncable));
+            }
+
+            List<Pair<EquipmentSlot, ItemStack>> equip = new ArrayList<>();
+            for (EquipmentSlot slot : EquipmentSlot.values()) {
+                ItemStack item = living.getItemBySlot(slot);
+                if (!item.isEmpty()) equip.add(Pair.of(slot, item.copy()));
+            }
+            if (!equip.isEmpty()) {
+                pendingGamePackets.add(new ClientboundSetEquipmentPacket(entity.getId(), equip));
+            }
+        }
+
+        if (entity.isVehicle()) pendingGamePackets.add(new ClientboundSetPassengersPacket(entity));
+        if (entity.isPassenger()) pendingGamePackets.add(new ClientboundSetPassengersPacket(entity.getVehicle()));
+//#if MC >= 12005
+        if (entity instanceof Leashable leashable && leashable.isLeashed()) {
+            pendingGamePackets.add(new ClientboundSetEntityLinkPacket(entity, leashable.getLeashHolder()));
+        }
+//#else
+//$$         if (entity instanceof Mob mob && mob.isLeashed()) {
+//$$             pendingGamePackets.add(new ClientboundSetEntityLinkPacket(entity, mob.getLeashHolder()));
+//$$         }
+//#endif
+    }
+
+    public void queueEntityDespawn(int entityId) {
+        if (closeForWriting || isPaused) return;
+        if (!trackedEntityIds.remove(entityId)) return;
+        lastPositions.remove(entityId);
+        pendingGamePackets.add(new ClientboundRemoveEntitiesPacket(entityId));
+    }
+
+    public void queueEntityPacket(Packet<? super ClientGamePacketListener> packet) {
+        if (!closeForWriting && !isPaused) {
+            pendingGamePackets.add(packet);
+        }
+    }
 
     public void onChunkUnload(ServerLevel level, LevelChunk chunk) {
         ChunkPos pos = chunk.getPos();
@@ -316,10 +389,13 @@ public class ServerRecorder {
     private void writeEntityPositions(ServerLevel level) {
         record IdPos(int id, Position pos) {}
         List<IdPos> changed = new ArrayList<>();
+        Set<Integer> seenIds = new HashSet<>();
 
         for (Entity entity : level.getAllEntities()) {
             if (PacketHelper.shouldIgnoreEntity(entity)) continue;
             if (!isInArea(entity.getX(), entity.getZ())) continue;
+
+            seenIds.add(entity.getId());
 
             float headRot = entity.getYHeadRot();
             if (entity instanceof LivingEntity living) {
@@ -334,6 +410,18 @@ public class ServerRecorder {
                 lastPositions.put(entity.getId(), pos);
                 changed.add(new IdPos(entity.getId(), pos));
             }
+        }
+
+        List<Integer> leftArea = new ArrayList<>();
+        for (int id : trackedEntityIds) {
+            if (!seenIds.contains(id)) {
+                leftArea.add(id);
+            }
+        }
+        for (int id : leftArea) {
+            trackedEntityIds.remove(id);
+            lastPositions.remove(id);
+            pendingGamePackets.add(new ClientboundRemoveEntitiesPacket(id));
         }
 
         if (changed.isEmpty()) return;
@@ -478,6 +566,68 @@ public class ServerRecorder {
         gamePackets.add(new ClientboundGameEventPacket(ClientboundGameEventPacket.RAIN_LEVEL_CHANGE, level.getRainLevel(1.0f)));
         gamePackets.add(new ClientboundGameEventPacket(ClientboundGameEventPacket.THUNDER_LEVEL_CHANGE, level.getThunderLevel(1.0f)));
 
+        // Tab list
+//#if MC >= 11900
+        gamePackets.add(new ClientboundTabListPacket(Component.empty(), Component.empty()));
+//#else
+//$$         gamePackets.add(new ClientboundTabListPacket(net.minecraft.network.chat.TextComponent.EMPTY, net.minecraft.network.chat.TextComponent.EMPTY));
+//#endif
+
+        // Boss bars
+        for (var event : server.getCustomBossEvents().getEvents()) {
+            if (event.isVisible()) {
+                gamePackets.add(ClientboundBossEventPacket.createAddPacket(event));
+            }
+        }
+
+        // Scoreboard
+//#if MC >= 12005
+        var scoreboard = level.getScoreboard();
+        for (PlayerTeam team : scoreboard.getPlayerTeams()) {
+            gamePackets.add(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, true));
+        }
+        Set<Objective> handledObjectives = new HashSet<>();
+        for (DisplaySlot slot : DisplaySlot.values()) {
+            Objective objective = scoreboard.getDisplayObjective(slot);
+            if (objective != null && handledObjectives.add(objective)) {
+                gamePackets.add(new ClientboundSetObjectivePacket(objective, 0));
+                for (DisplaySlot slot2 : DisplaySlot.values()) {
+                    if (scoreboard.getDisplayObjective(slot2) == objective) {
+                        gamePackets.add(new ClientboundSetDisplayObjectivePacket(slot2, objective));
+                    }
+                }
+                for (PlayerScoreEntry entry : scoreboard.listPlayerScores(objective)) {
+                    gamePackets.add(new ClientboundSetScorePacket(
+                            entry.owner(), objective.getName(), entry.value(),
+                            Optional.ofNullable(entry.display()),
+                            Optional.ofNullable(entry.numberFormatOverride())));
+                }
+            }
+        }
+//#else
+//$$         var scoreboard = level.getScoreboard();
+//$$         for (PlayerTeam team : scoreboard.getPlayerTeams()) {
+//$$             gamePackets.add(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, true));
+//$$         }
+//$$         Set<Objective> handledObjectives = new HashSet<>();
+//$$         for (int slot = 0; slot < 19; slot++) {
+//$$             Objective objective = scoreboard.getDisplayObjective(slot);
+//$$             if (objective != null && handledObjectives.add(objective)) {
+//$$                 gamePackets.add(new ClientboundSetObjectivePacket(objective, 0));
+//$$                 for (int slot2 = 0; slot2 < 19; slot2++) {
+//$$                     if (scoreboard.getDisplayObjective(slot2) == objective) {
+//$$                         gamePackets.add(new ClientboundSetDisplayObjectivePacket(slot2, objective));
+//$$                     }
+//$$                 }
+//$$                 for (Score score : scoreboard.getPlayerScores(objective)) {
+//$$                     gamePackets.add(new ClientboundSetScorePacket(
+//$$                             ServerScoreboard.Method.CHANGE, objective.getName(),
+//$$                             score.getOwner(), score.getScore()));
+//$$                 }
+//$$             }
+//$$         }
+//#endif
+
         // Chunks
         ChunkPos cc = new ChunkPos(center);
         List<ClientboundLevelChunkWithLightPacket> chunkPackets = new ArrayList<>();
@@ -514,11 +664,14 @@ public class ServerRecorder {
         }));
         gamePackets.addAll(chunkPackets);
 
-        // Entities
+        // Entities — snapshot provides a complete fresh set, reset tracking
+        trackedEntityIds.clear();
+        lastPositions.clear();
         for (Entity entity : level.getAllEntities()) {
             if (PacketHelper.shouldIgnoreEntity(entity)) continue;
             if (!isInArea(entity.getX(), entity.getZ())) continue;
 
+            trackedEntityIds.add(entity.getId());
             gamePackets.add(PacketHelper.createAddEntity(entity));
 
 //#if MC >= 11904

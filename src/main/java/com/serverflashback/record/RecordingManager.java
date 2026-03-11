@@ -2,8 +2,16 @@ package com.serverflashback.record;
 
 import com.serverflashback.io.ReplayExporter;
 import net.minecraft.core.BlockPos;
+//#if MC >= 11900
+import net.minecraft.core.Holder;
+//#endif
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -120,6 +128,53 @@ public class RecordingManager {
         for (ServerRecorder recorder : activeRecordings.values()) {
             if (recorder.isInArea(pos, level.dimension())) {
                 recorder.queueLevelEvent(type, pos, data, global);
+            }
+        }
+    }
+
+//#if MC >= 11900
+    public void onSound(ServerLevel level, Holder<SoundEvent> sound, SoundSource source,
+                        double x, double y, double z, float volume, float pitch, long seed) {
+        for (ServerRecorder recorder : activeRecordings.values()) {
+            if (recorder.getDimension() == level.dimension() && recorder.isInArea(x, z)) {
+                recorder.queueSound(sound, source, x, y, z, volume, pitch, seed);
+            }
+        }
+    }
+//#else
+//$$     public void onSound(ServerLevel level, SoundEvent sound, SoundSource source,
+//$$                         double x, double y, double z, float volume, float pitch) {
+//$$         for (ServerRecorder recorder : activeRecordings.values()) {
+//$$             if (recorder.getDimension() == level.dimension() && recorder.isInArea(x, z)) {
+//$$                 recorder.queueSound(sound, source, x, y, z, volume, pitch);
+//$$             }
+//$$         }
+//$$     }
+//#endif
+
+    public void onEntitySpawn(ServerLevel level, Entity entity) {
+        for (ServerRecorder recorder : activeRecordings.values()) {
+            if (recorder.getDimension() == level.dimension()
+                    && recorder.isInArea(entity.getX(), entity.getZ())) {
+                recorder.queueEntitySpawn(entity);
+            }
+        }
+    }
+
+    public void onEntityDespawn(ServerLevel level, Entity entity) {
+        for (ServerRecorder recorder : activeRecordings.values()) {
+            if (recorder.getDimension() == level.dimension()) {
+                recorder.queueEntityDespawn(entity.getId());
+            }
+        }
+    }
+
+    public void onEntityPacket(ServerLevel level, Entity entity,
+                               Packet<? super ClientGamePacketListener> packet) {
+        for (ServerRecorder recorder : activeRecordings.values()) {
+            if (recorder.getDimension() == level.dimension()
+                    && recorder.isInArea(entity.getX(), entity.getZ())) {
+                recorder.queueEntityPacket(packet);
             }
         }
     }

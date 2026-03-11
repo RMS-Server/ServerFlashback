@@ -50,6 +50,19 @@ public class CachedChunkPacket {
         frenBuffer.getBytes(0, lightBytes);
         digest.update(lightBytes);
         frenBuffer.release();
+
+        for (var beInfo : packet.getChunkData().blockEntitiesData) {
+            digest.update(intToByteArray(beInfo.packedXZ));
+            digest.update(intToByteArray(beInfo.y));
+            if (beInfo.tag != null) {
+                FriendlyByteBuf tagBuf = new FriendlyByteBuf(Unpooled.buffer());
+                tagBuf.writeNbt(beInfo.tag);
+                byte[] tagBytes = new byte[tagBuf.writerIndex()];
+                tagBuf.getBytes(0, tagBytes);
+                digest.update(tagBytes);
+                tagBuf.release();
+            }
+        }
 //#else
 //$$         FriendlyByteBuf frenBuffer = new FriendlyByteBuf(Unpooled.buffer());
 //$$         packet.write(frenBuffer);

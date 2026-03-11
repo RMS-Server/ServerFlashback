@@ -3,7 +3,10 @@
   "package": "com.serverflashback.mixin",
   "compatibilityLevel": "JAVA_$java_version",
   "mixins": [
-    "MixinServerLevel"
+    "MixinEntity",
+    "MixinServerEntity",
+    "MixinServerLevel",
+    "MixinServerLevelRecording"
   ],
   "injectors": {
     "defaultRequire": 1
