@@ -130,6 +130,13 @@ public class ServerRecorder {
     private volatile boolean needsInitialSnapshot = true;
     private boolean finishedPausing = false;
 
+    private boolean lastRaining = false;
+    private float lastRainLevel = 0;
+    private float lastThunderLevel = 0;
+    private double lastBorderSize = -1;
+    private double lastBorderCenterX = Double.NaN;
+    private double lastBorderCenterZ = Double.NaN;
+
     public ServerRecorder(MinecraftServer server, ServerLevel level, BlockPos center, int radiusInBlocks, String name) {
         this.server = server;
         this.registryAccess = server.registryAccess();
@@ -278,6 +285,12 @@ public class ServerRecorder {
         }
     }
 
+    public void queueGamePacket(Packet<? super ClientGamePacketListener> packet) {
+        if (!closeForWriting && !isPaused) {
+            pendingGamePackets.add(packet);
+        }
+    }
+
     public void onChunkUnload(ServerLevel level, LevelChunk chunk) {
         ChunkPos pos = chunk.getPos();
         if (isChunkInArea(pos) && level.dimension() == this.dimension) {
@@ -314,12 +327,25 @@ public class ServerRecorder {
             this.needsInitialSnapshot = false;
             this.forceLoadAndCacheChunks(level);
             this.writeSnapshot(level, true);
+
+            this.lastRaining = level.isRaining();
+            this.lastRainLevel = level.getRainLevel(1.0f);
+            this.lastThunderLevel = level.getThunderLevel(1.0f);
+            WorldBorder border = level.getWorldBorder();
+            this.lastBorderSize = border.getSize();
+            this.lastBorderCenterX = border.getCenterX();
+            this.lastBorderCenterZ = border.getCenterZ();
         }
 
         this.flushPendingPackets();
 
         boolean wroteNewTick = false;
         if (!this.isPaused) {
+            this.trackWeatherChanges(level);
+            if (this.writtenTicks % 20 == 0) {
+                this.sendTimePacket(level);
+                this.trackBorderChanges(level);
+            }
             this.writeEntityPositions(level);
             wroteNewTick = true;
             this.asyncReplaySaver.submit(writer -> writer.startAndFinishAction(ActionNextTick.INSTANCE));
@@ -723,6 +749,47 @@ public class ServerRecorder {
 
         if (asActualSnapshot) {
             asyncReplaySaver.submit(ReplayWriter::endSnapshot);
+        }
+    }
+
+    private void trackWeatherChanges(ServerLevel level) {
+        boolean raining = level.isRaining();
+        float rainLevel = level.getRainLevel(1.0f);
+        float thunderLevel = level.getThunderLevel(1.0f);
+
+        if (raining != lastRaining) {
+            lastRaining = raining;
+            pendingGamePackets.add(new ClientboundGameEventPacket(
+                    raining ? ClientboundGameEventPacket.START_RAINING : ClientboundGameEventPacket.STOP_RAINING, 0));
+        }
+        if (Math.abs(rainLevel - lastRainLevel) > 0.01f) {
+            lastRainLevel = rainLevel;
+            pendingGamePackets.add(new ClientboundGameEventPacket(
+                    ClientboundGameEventPacket.RAIN_LEVEL_CHANGE, rainLevel));
+        }
+        if (Math.abs(thunderLevel - lastThunderLevel) > 0.01f) {
+            lastThunderLevel = thunderLevel;
+            pendingGamePackets.add(new ClientboundGameEventPacket(
+                    ClientboundGameEventPacket.THUNDER_LEVEL_CHANGE, thunderLevel));
+        }
+    }
+
+    private void sendTimePacket(ServerLevel level) {
+        pendingGamePackets.add(new ClientboundSetTimePacket(
+                level.getGameTime(), level.getDayTime(),
+                level.getGameRules().getBoolean(net.minecraft.world.level.GameRules.RULE_DAYLIGHT)));
+    }
+
+    private void trackBorderChanges(ServerLevel level) {
+        WorldBorder border = level.getWorldBorder();
+        double size = border.getSize();
+        double centerX = border.getCenterX();
+        double centerZ = border.getCenterZ();
+        if (size != lastBorderSize || centerX != lastBorderCenterX || centerZ != lastBorderCenterZ) {
+            lastBorderSize = size;
+            lastBorderCenterX = centerX;
+            lastBorderCenterZ = centerZ;
+            pendingGamePackets.add(new ClientboundInitializeBorderPacket(border));
         }
     }
 

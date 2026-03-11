@@ -3,9 +3,8 @@ package com.serverflashback.mixin;
 import com.serverflashback.record.RecordingManager;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
-import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
-import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
-import net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket;
+import net.minecraft.network.protocol.game.ClientboundMoveEntityPacket;
+import net.minecraft.network.protocol.game.ClientboundRotateHeadPacket;
 import net.minecraft.server.level.ServerEntity;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
@@ -24,9 +23,8 @@ public class MixinServerEntity {
     @SuppressWarnings("unchecked")
     @Inject(method = "broadcastAndSend", at = @At("HEAD"))
     private void serverflashback$onBroadcast(Packet<?> packet, CallbackInfo ci) {
-        if (!(packet instanceof ClientboundSetEntityDataPacket)
-                && !(packet instanceof ClientboundSetEquipmentPacket)
-                && !(packet instanceof ClientboundUpdateAttributesPacket)) {
+        if (packet instanceof ClientboundMoveEntityPacket
+                || packet instanceof ClientboundRotateHeadPacket) {
             return;
         }
 //#if MC >= 12002

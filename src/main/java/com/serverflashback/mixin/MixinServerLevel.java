@@ -4,6 +4,7 @@ import com.serverflashback.record.RecordingManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -20,6 +21,15 @@ public class MixinServerLevel {
         if (cir.getReturnValue() && (Object) this instanceof ServerLevel serverLevel
                 && RecordingManager.getInstance().hasActiveRecordings()) {
             RecordingManager.getInstance().onBlockChange(serverLevel, pos, state);
+
+            BlockEntity blockEntity = ((Level) (Object) this).getBlockEntity(pos);
+            if (blockEntity != null) {
+                var updatePacket = blockEntity.getUpdatePacket();
+                if (updatePacket != null) {
+                    RecordingManager.getInstance().onPositionedGamePacket(
+                            serverLevel, pos.getX(), pos.getZ(), updatePacket);
+                }
+            }
         }
     }
 }

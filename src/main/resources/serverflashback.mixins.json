@@ -4,6 +4,10 @@
   "compatibilityLevel": "JAVA_$java_version",
   "mixins": [
     "MixinEntity",
+    "MixinLeashable",
+    "MixinLivingEntityEffects",
+    "MixinPlayerList",
+    "MixinServerBossEvent",
     "MixinServerEntity",
     "MixinServerLevel",
     "MixinServerLevelRecording"

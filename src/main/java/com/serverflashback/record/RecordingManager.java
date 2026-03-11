@@ -191,6 +191,21 @@ public class RecordingManager {
         }
     }
 
+    public void onPositionedGamePacket(ServerLevel level, double x, double z,
+                                       Packet<? super ClientGamePacketListener> packet) {
+        for (ServerRecorder recorder : activeRecordings.values()) {
+            if (recorder.getDimension() == level.dimension() && recorder.isInArea(x, z)) {
+                recorder.queueGamePacket(packet);
+            }
+        }
+    }
+
+    public void onGlobalGamePacket(Packet<? super ClientGamePacketListener> packet) {
+        for (ServerRecorder recorder : activeRecordings.values()) {
+            recorder.queueGamePacket(packet);
+        }
+    }
+
     public void stopAll(MinecraftServer server) {
         for (String name : new ArrayList<>(activeRecordings.keySet())) {
             stopRecording(server, name);
