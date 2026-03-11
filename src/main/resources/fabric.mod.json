@@ -2,21 +2,19 @@
   "schemaVersion": 1,
   "id": "$id",
   "version": "$version",
-  "name": "Example Mod",
-  "description": "This is an example description! Tell everyone what your mod is about!",
+  "name": "ServerFlashback",
+  "description": "Server-side replay recording mod producing FlashBack-compatible replay files",
   "authors": [
-    "Me!"
+    "Trirrin"
   ],
   "contact": {
-    "homepage": "https://github.com/RMS-Server/preprocessor-example-mod",
-    "sources": "https://github.com/RMS-Server/preprocessor-example-mod"
+    "sources": "https://github.com/Trirrin/ServerFlashback"
   },
   "license": "GPL-3.0",
-  "icon": "assets/$id/icon.png",
-  "environment": "*",
+  "environment": "server",
   "entrypoints": {
     "main": [
-      "com.example.ExampleMod"
+      "com.serverflashback.ServerFlashback"
     ]
   },
   "mixins": [
@@ -25,6 +23,7 @@
   "accessWidener": "${id}.accesswidener",
   "depends": {
     "fabricloader": ">=$loader_version",
-    "minecraft": "$minecraft_version"
+    "minecraft": "$minecraft_version",
+    "fabric-api": "*"
   }
 }
