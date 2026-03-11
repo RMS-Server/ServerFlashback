@@ -1,6 +1,6 @@
 {
   "required": true,
-  "package": "com.serverflashback.mixin",
+  "package": "cn.net.rms.serverflashback.mixin",
   "compatibilityLevel": "JAVA_$java_version",
   "mixins": [
     "MixinEntity",

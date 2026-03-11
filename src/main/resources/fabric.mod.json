@@ -14,7 +14,7 @@
   "environment": "server",
   "entrypoints": {
     "main": [
-      "com.serverflashback.ServerFlashback"
+      "cn.net.rms.serverflashback.ServerFlashback"
     ]
   },
   "mixins": [
