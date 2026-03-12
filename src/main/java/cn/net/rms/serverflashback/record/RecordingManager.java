@@ -7,6 +7,7 @@ import net.minecraft.core.Holder;
 //#endif
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
+import net.minecraft.network.protocol.game.ClientboundEntityEventPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
@@ -167,6 +168,10 @@ public class RecordingManager {
                 recorder.queueEntityDespawn(entity.getId());
             }
         }
+    }
+
+    public void onEntityEvent(ServerLevel level, Entity entity, byte status) {
+        onEntityPacket(level, entity, new ClientboundEntityEventPacket(entity, status));
     }
 
     public void onEntityPacket(ServerLevel level, Entity entity,

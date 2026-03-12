@@ -10,7 +10,9 @@
     "MixinPlayerList",
     "MixinServerBossEvent",
     "MixinServerEntity",
+    "MixinServerGamePacketListenerImpl",
     "MixinServerLevel",
+    "MixinServerLevelEntityEvent",
     "MixinServerLevelRecording"
   ],
   "injectors": {
