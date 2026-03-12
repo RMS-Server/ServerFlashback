@@ -219,6 +219,13 @@ public class ServerRecorder {
             pendingGamePackets.add(new ClientboundSoundPacket(sound, source, x, y, z, volume, pitch, seed));
         }
     }
+
+    public void queueEntitySound(Holder<SoundEvent> sound, SoundSource source, Entity entity,
+                                 float volume, float pitch, long seed) {
+        if (!closeForWriting && !isPaused && isInArea(entity.getX(), entity.getZ())) {
+            pendingGamePackets.add(new ClientboundSoundEntityPacket(sound, source, entity, volume, pitch, seed));
+        }
+    }
 //#else
 //$$ public void queueSound(SoundEvent sound, SoundSource source,
 //$$                        double x, double y, double z, float volume, float pitch) {

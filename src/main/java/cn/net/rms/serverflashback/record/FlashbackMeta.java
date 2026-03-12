@@ -3,6 +3,11 @@ package cn.net.rms.serverflashback.record;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
+//#if MC >= 11903
+import org.joml.Vector3f;
+//#else
+//$$ import com.mojang.math.Vector3f;
+//#endif
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.jetbrains.annotations.Nullable;
@@ -41,7 +46,9 @@ public class FlashbackMeta {
         if (this.totalTicks > 0) meta.addProperty("total_ticks", this.totalTicks);
 
         if (!this.replayMarkers.isEmpty()) {
-            Gson gson = new GsonBuilder().create();
+            Gson gson = new GsonBuilder()
+                    .registerTypeAdapter(Vector3f.class, new Vector3fTypeAdapter())
+                    .create();
             JsonObject jsonMarkers = new JsonObject();
             for (Map.Entry<Integer, ReplayMarker> entry : this.replayMarkers.entrySet()) {
                 jsonMarkers.add("" + entry.getKey(), gson.toJsonTree(entry.getValue()));
@@ -82,7 +89,9 @@ public class FlashbackMeta {
         if (meta.has("total_ticks")) m.totalTicks = meta.get("total_ticks").getAsInt();
 
         if (meta.has("markers")) {
-            Gson gson = new GsonBuilder().create();
+            Gson gson = new GsonBuilder()
+                    .registerTypeAdapter(Vector3f.class, new Vector3fTypeAdapter())
+                    .create();
             for (Map.Entry<String, JsonElement> entry : meta.getAsJsonObject("markers").entrySet()) {
                 try {
                     m.replayMarkers.put(Integer.parseInt(entry.getKey()),

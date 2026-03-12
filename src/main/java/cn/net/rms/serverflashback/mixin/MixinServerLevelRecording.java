@@ -9,6 +9,7 @@ import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.network.protocol.game.ClientboundBlockDestructionPacket;
 import net.minecraft.network.protocol.game.ClientboundExplodePacket;
 import net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket;
+import net.minecraft.network.protocol.game.ClientboundSoundEntityPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
@@ -50,6 +51,16 @@ public class MixinServerLevelRecording {
         if (RecordingManager.getInstance().hasActiveRecordings()) {
             RecordingManager.getInstance().onSound(
                     (ServerLevel) (Object) this, sound, source, x, y, z, volume, pitch, seed);
+        }
+    }
+
+    @Inject(method = "playSeededSound(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/entity/Entity;Lnet/minecraft/core/Holder;Lnet/minecraft/sounds/SoundSource;FFJ)V",
+            at = @At("HEAD"))
+    private void serverflashback$onPlaySoundEntity(Entity source, Entity entity, Holder<SoundEvent> sound,
+                                                   SoundSource soundSource, float volume, float pitch, long seed, CallbackInfo ci) {
+        if (RecordingManager.getInstance().hasActiveRecordings()) {
+            RecordingManager.getInstance().onEntitySound(
+                    (ServerLevel) (Object) this, sound, soundSource, entity, volume, pitch, seed);
         }
     }
 //#else

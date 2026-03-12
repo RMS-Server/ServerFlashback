@@ -142,6 +142,15 @@ public class RecordingManager {
             }
         }
     }
+
+    public void onEntitySound(ServerLevel level, Holder<SoundEvent> sound, SoundSource source,
+                              Entity entity, float volume, float pitch, long seed) {
+        for (ServerRecorder recorder : activeRecordings.values()) {
+            if (recorder.getDimension() == level.dimension()) {
+                recorder.queueEntitySound(sound, source, entity, volume, pitch, seed);
+            }
+        }
+    }
 //#else
 //$$     public void onSound(ServerLevel level, SoundEvent sound, SoundSource source,
 //$$                         double x, double y, double z, float volume, float pitch) {
