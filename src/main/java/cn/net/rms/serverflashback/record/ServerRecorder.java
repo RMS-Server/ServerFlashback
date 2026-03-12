@@ -63,6 +63,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -120,6 +121,9 @@ public class ServerRecorder {
 
     private final Map<Integer, Position> lastPositions = new HashMap<>();
     private final Set<Integer> trackedEntityIds = new HashSet<>();
+
+    private static final long BLOCK_ENTITY_COOLDOWN_TICKS = 20;
+    private final Map<Long, Long> blockEntityUpdateTicks = new HashMap<>();
 
     private final UUID virtualPlayerUUID = UUID.randomUUID();
     private static final int VIRTUAL_PLAYER_ID = Integer.MAX_VALUE - 1;
@@ -289,6 +293,24 @@ public class ServerRecorder {
         if (!closeForWriting && !isPaused) {
             pendingGamePackets.add(packet);
         }
+    }
+
+    public void queueBlockEntityUpdate(ServerLevel level, BlockPos pos) {
+        if (closeForWriting || isPaused) return;
+
+        long packedPos = pos.asLong();
+        long currentTick = level.getGameTime();
+        Long lastUpdate = blockEntityUpdateTicks.get(packedPos);
+        if (lastUpdate != null && currentTick - lastUpdate < BLOCK_ENTITY_COOLDOWN_TICKS) return;
+
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be == null) return;
+
+        var packet = be.getUpdatePacket();
+        if (packet == null) return;
+
+        blockEntityUpdateTicks.put(packedPos, currentTick);
+        pendingGamePackets.add(packet);
     }
 
     public void onChunkUnload(ServerLevel level, LevelChunk chunk) {
@@ -520,6 +542,8 @@ public class ServerRecorder {
     }
 
     public void writeSnapshot(ServerLevel level, boolean asActualSnapshot) {
+        blockEntityUpdateTicks.clear();
+
         if (asActualSnapshot) {
             asyncReplaySaver.submit(ReplayWriter::startSnapshot);
         }

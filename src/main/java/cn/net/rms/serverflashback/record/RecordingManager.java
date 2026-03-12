@@ -200,6 +200,14 @@ public class RecordingManager {
         }
     }
 
+    public void onBlockEntityChanged(ServerLevel level, BlockPos pos) {
+        for (ServerRecorder recorder : activeRecordings.values()) {
+            if (recorder.isInArea(pos, level.dimension())) {
+                recorder.queueBlockEntityUpdate(level, pos);
+            }
+        }
+    }
+
     public void onGlobalGamePacket(Packet<? super ClientGamePacketListener> packet) {
         for (ServerRecorder recorder : activeRecordings.values()) {
             recorder.queueGamePacket(packet);
