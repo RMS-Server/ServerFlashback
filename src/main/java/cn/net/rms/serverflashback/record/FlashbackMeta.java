@@ -36,8 +36,8 @@ public class FlashbackMeta {
 
         if (this.versionString != null) meta.addProperty("version_string", this.versionString);
         if (this.worldName != null) meta.addProperty("world_name", this.worldName);
-        if (this.dataVersion != 0) meta.addProperty("data_version", this.dataVersion);
-        if (this.protocolVersion != 0) meta.addProperty("protocol_version", this.protocolVersion);
+        meta.addProperty("data_version", this.dataVersion);
+        meta.addProperty("protocol_version", this.protocolVersion);
         if (this.totalTicks > 0) meta.addProperty("total_ticks", this.totalTicks);
 
         if (!this.replayMarkers.isEmpty()) {
