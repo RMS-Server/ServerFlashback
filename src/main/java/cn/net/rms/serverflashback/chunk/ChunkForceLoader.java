@@ -40,7 +40,8 @@ public class ChunkForceLoader {
                         cache.cacheChunkPacket(pos, createPacket(chunk, level));
                         alreadyLoaded++;
                     } catch (Exception e) {
-                        LOGGER.warn("Failed to cache loaded chunk {}: {}", pos, e.getMessage());
+                        LOGGER.warn("Failed to cache loaded chunk {}, queuing for ticket load: {}", pos, e.getMessage());
+                        toSchedule.add(pos);
                     }
                 } else {
                     toSchedule.add(pos);
@@ -89,7 +90,7 @@ public class ChunkForceLoader {
                 LevelChunk chunk = level.getChunk(pos.x, pos.z);
                 cache.cacheChunkPacket(pos, createPacket(chunk, level));
             } catch (Exception e) {
-                LOGGER.warn("Failed to force-load chunk {}: {}", pos, e.getMessage());
+                LOGGER.error("Failed to force-load chunk {} during shutdown, chunk data will be missing from replay: {}", pos, e.getMessage());
             }
             level.getChunkSource().removeRegionTicket(RECORDING_TICKET, pos, 0, pos);
             it.remove();
@@ -112,14 +113,53 @@ public class ChunkForceLoader {
             if (chunk != null) {
                 try {
                     cache.cacheChunkPacket(pos, createPacket(chunk, level));
+                    level.getChunkSource().removeRegionTicket(RECORDING_TICKET, pos, 0, pos);
+                    it.remove();
                 } catch (Exception e) {
-                    LOGGER.warn("Failed to cache async-loaded chunk {}: {}", pos, e.getMessage());
+                    LOGGER.warn("Failed to cache async-loaded chunk {}, will retry next tick: {}", pos, e.getMessage());
                 }
-                level.getChunkSource().removeRegionTicket(RECORDING_TICKET, pos, 0, pos);
-                it.remove();
             }
         }
         return pending.isEmpty();
+    }
+
+    /**
+     * Verification pass: after initial chunk loading completes, scan every position in the
+     * recording area and synchronously force-load any chunk that is both unloaded and absent
+     * from the cache. Chunks that are currently loaded are fine — writeSnapshot() will read
+     * them live — so they are not repaired here.
+     *
+     * @return number of chunks that required repair
+     */
+    public static int repairMissingChunks(
+            ServerLevel level, ChunkPos center, int radiusInChunks, ChunkDataCache cache) {
+
+        List<ChunkPos> missing = new ArrayList<>();
+        for (int dx = -radiusInChunks; dx <= radiusInChunks; dx++) {
+            for (int dz = -radiusInChunks; dz <= radiusInChunks; dz++) {
+                ChunkPos pos = new ChunkPos(center.x + dx, center.z + dz);
+                if (!cache.hasCachedData(pos) && level.getChunkSource().getChunkNow(pos.x, pos.z) == null) {
+                    missing.add(pos);
+                }
+            }
+        }
+        if (missing.isEmpty()) return 0;
+
+        LOGGER.warn("Verification found {} chunks with missing cache data, repairing before snapshot...", missing.size());
+        int repaired = 0;
+        for (ChunkPos pos : missing) {
+            level.getChunkSource().addRegionTicket(RECORDING_TICKET, pos, 0, pos);
+            try {
+                LevelChunk chunk = level.getChunk(pos.x, pos.z);
+                cache.cacheChunkPacket(pos, createPacket(chunk, level));
+                repaired++;
+            } catch (Exception e) {
+                LOGGER.error("Failed to repair missing chunk {}, it will appear as void in the replay: {}", pos, e.getMessage());
+            }
+            level.getChunkSource().removeRegionTicket(RECORDING_TICKET, pos, 0, pos);
+        }
+        LOGGER.info("Chunk repair complete: {}/{} repaired", repaired, missing.size());
+        return repaired;
     }
 
     /**

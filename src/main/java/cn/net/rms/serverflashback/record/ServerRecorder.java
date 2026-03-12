@@ -442,6 +442,8 @@ public class ServerRecorder {
         this.toSchedule = null;
         this.pendingChunkLoads = null;
 
+        ChunkForceLoader.repairMissingChunks(level, new ChunkPos(center), radiusInChunks, chunkDataCache);
+
         pendingGamePackets.clear();
 
         this.writeSnapshot(level, true);
