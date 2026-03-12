@@ -19,7 +19,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 //#else
 //$$ @Mixin(Mob.class)
 //#endif
-public class MixinLeashable {
+public interface MixinLeashable {
 
 //#if MC >= 12005
     @Inject(method = "setLeashedTo", at = @At("RETURN"))
@@ -35,8 +35,7 @@ public class MixinLeashable {
     }
 
     @Inject(method = "dropLeash", at = @At("HEAD"))
-    private void serverflashback$onDropLeash(boolean sendPacket, boolean dropItem, CallbackInfo ci) {
-        if (!sendPacket) return;
+    private void serverflashback$onDropLeash(CallbackInfo ci) {
         Entity self = (Entity) (Object) this;
         if (self.level() instanceof ServerLevel serverLevel
                 && RecordingManager.getInstance().hasActiveRecordings()) {

@@ -54,9 +54,9 @@ public class MixinServerLevelRecording {
         }
     }
 
-    @Inject(method = "playSeededSound(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/entity/Entity;Lnet/minecraft/core/Holder;Lnet/minecraft/sounds/SoundSource;FFJ)V",
+    @Inject(method = "playSeededSound(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/entity/Entity;Lnet/minecraft/core/Holder;Lnet/minecraft/sounds/SoundSource;FFJ)V",
             at = @At("HEAD"))
-    private void serverflashback$onPlaySoundEntity(Entity source, Entity entity, Holder<SoundEvent> sound,
+    private void serverflashback$onPlaySoundEntity(Player source, Entity entity, Holder<SoundEvent> sound,
                                                    SoundSource soundSource, float volume, float pitch, long seed, CallbackInfo ci) {
         if (RecordingManager.getInstance().hasActiveRecordings()) {
             RecordingManager.getInstance().onEntitySound(

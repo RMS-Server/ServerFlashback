@@ -5,6 +5,9 @@ import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.*;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+//#if MC >= 12002
+import net.minecraft.server.network.ServerCommonPacketListenerImpl;
+//#endif
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -15,10 +18,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.Set;
 
-@Mixin(ServerGamePacketListenerImpl.class)
+//#if MC >= 12002
+@Mixin(ServerCommonPacketListenerImpl.class)
+//#else
+//$$ @Mixin(ServerGamePacketListenerImpl.class)
+//#endif
 public class MixinServerGamePacketListenerImpl {
 
-    @Shadow public ServerPlayer player;
+//#if MC < 12002
+//$$     @Shadow public ServerPlayer player;
+//#endif
 
     @Unique
     private static final Set<Class<?>> CAPTURED_PACKETS = Set.of(
@@ -34,14 +43,17 @@ public class MixinServerGamePacketListenerImpl {
     private void serverflashback$onSend(Packet<?> packet, CallbackInfo ci) {
         if (!CAPTURED_PACKETS.contains(packet.getClass())) return;
         if (!RecordingManager.getInstance().hasActiveRecordings()) return;
-
 //#if MC >= 12002
-        ServerLevel level = (ServerLevel) this.player.level();
+        if (!((Object) this instanceof ServerGamePacketListenerImpl gameListener)) return;
+        ServerLevel level = (ServerLevel) gameListener.player.level();
+        RecordingManager.getInstance().onPositionedGamePacket(
+                level, gameListener.player.getX(), gameListener.player.getZ(),
+                (Packet<? super ClientGamePacketListener>) packet);
 //#else
 //$$         ServerLevel level = (ServerLevel) this.player.level;
+//$$         RecordingManager.getInstance().onPositionedGamePacket(
+//$$                 level, this.player.getX(), this.player.getZ(),
+//$$                 (Packet<? super ClientGamePacketListener>) packet);
 //#endif
-        RecordingManager.getInstance().onPositionedGamePacket(
-                level, this.player.getX(), this.player.getZ(),
-                (Packet<? super ClientGamePacketListener>) packet);
     }
 }
