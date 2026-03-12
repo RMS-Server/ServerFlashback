@@ -16,10 +16,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 //#if MC >= 12005
 @Mixin(Leashable.class)
+public interface MixinLeashable {
 //#else
 //$$ @Mixin(Mob.class)
+//$$ public abstract class MixinLeashable {
 //#endif
-public interface MixinLeashable {
 
 //#if MC >= 12005
     @Inject(method = "setLeashedTo", at = @At("RETURN"))

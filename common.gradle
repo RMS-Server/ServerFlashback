@@ -30,3 +30,11 @@ java {
     targetCompatibility = javaCompatibility
 }
 jar { from '../../LICENSE' }
+
+if (mcVersion < 11800) {
+    processResources {
+        filesMatching('fabric.mod.json') {
+            filter { line -> line.replace('"fabric-api"', '"fabric"') }
+        }
+    }
+}
