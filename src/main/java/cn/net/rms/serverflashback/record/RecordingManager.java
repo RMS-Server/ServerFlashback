@@ -31,8 +31,17 @@ public class RecordingManager {
     private static final RecordingManager INSTANCE = new RecordingManager();
 
     private final Map<String, ServerRecorder> activeRecordings = new ConcurrentHashMap<>();
+    private static boolean blockEventInProgress = false;
 
     private RecordingManager() {}
+
+    public static boolean isBlockEventInProgress() {
+        return blockEventInProgress;
+    }
+
+    public static void setBlockEventInProgress(boolean value) {
+        blockEventInProgress = value;
+    }
 
     public static RecordingManager getInstance() {
         return INSTANCE;
@@ -108,6 +117,7 @@ public class RecordingManager {
     }
 
     public void onServerTick(MinecraftServer server) {
+        blockEventInProgress = false;
         for (ServerRecorder recorder : activeRecordings.values()) {
             try {
                 recorder.endTick(false);

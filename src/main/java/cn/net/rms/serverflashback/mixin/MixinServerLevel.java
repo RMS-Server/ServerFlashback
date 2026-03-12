@@ -19,7 +19,8 @@ public class MixinServerLevel {
     private void serverflashback$onSetBlock(BlockPos pos, BlockState state, int flags, int recursionLeft,
                                             CallbackInfoReturnable<Boolean> cir) {
         if (cir.getReturnValue() && (Object) this instanceof ServerLevel serverLevel
-                && RecordingManager.getInstance().hasActiveRecordings()) {
+                && RecordingManager.getInstance().hasActiveRecordings()
+                && !RecordingManager.isBlockEventInProgress()) {
             RecordingManager.getInstance().onBlockChange(serverLevel, pos, state);
 
             BlockEntity blockEntity = ((Level) (Object) this).getBlockEntity(pos);

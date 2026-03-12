@@ -9,7 +9,7 @@
     "MixinLivingEntityEffects",
     "MixinPlayerList",
     "MixinServerBossEvent",
-    "MixinServerEntity",
+    "MixinServerChunkCache",
     "MixinServerGamePacketListenerImpl",
     "MixinServerLevel",
     "MixinServerLevelEntityEvent",

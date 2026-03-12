@@ -15,6 +15,7 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.BlockEventData;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -24,6 +25,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(ServerLevel.class)
 public class MixinServerLevelRecording {
+
+    @Inject(method = "doBlockEvent", at = @At("HEAD"))
+    private void serverflashback$onBlockEventStart(BlockEventData data, CallbackInfoReturnable<Boolean> cir) {
+        RecordingManager.setBlockEventInProgress(true);
+    }
+
+    @Inject(method = "doBlockEvent", at = @At("RETURN"))
+    private void serverflashback$onBlockEventEnd(BlockEventData data, CallbackInfoReturnable<Boolean> cir) {
+        RecordingManager.setBlockEventInProgress(false);
+    }
 
     @Inject(method = "levelEvent", at = @At("HEAD"))
     private void serverflashback$onLevelEvent(Player player, int type, BlockPos pos, int data,
