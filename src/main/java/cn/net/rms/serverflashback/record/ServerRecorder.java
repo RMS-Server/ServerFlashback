@@ -134,6 +134,13 @@ public class ServerRecorder {
     private volatile boolean needsInitialSnapshot = true;
     private boolean finishedPausing = false;
 
+    // Chunk loading is split into two stages to avoid a single-tick ticket registration spike.
+    // toSchedule: positions not yet ticketed (drained TICKET_BATCH_PER_TICK per tick)
+    // pendingChunkLoads: positions with ticket added, waiting for the chunk to load
+    private static final int TICKET_BATCH_PER_TICK = 500;
+    private List<ChunkPos> toSchedule = null;
+    private Set<ChunkPos> pendingChunkLoads = null;
+
     private boolean lastRaining = false;
     private float lastRainLevel = 0;
     private float lastThunderLevel = 0;
@@ -345,26 +352,33 @@ public class ServerRecorder {
 
     public void endTick(boolean close) {
         if (this.closeForWriting) return;
-        if (close) this.closeForWriting = true;
-
-        if (this.isPaused) this.wasPaused = true;
 
         ServerLevel level = server.getLevel(this.dimension);
         if (level == null) return;
 
         if (this.needsInitialSnapshot) {
             this.needsInitialSnapshot = false;
-            this.forceLoadAndCacheChunks(level);
-            this.writeSnapshot(level, true);
-
-            this.lastRaining = level.isRaining();
-            this.lastRainLevel = level.getRainLevel(1.0f);
-            this.lastThunderLevel = level.getThunderLevel(1.0f);
-            WorldBorder border = level.getWorldBorder();
-            this.lastBorderSize = border.getSize();
-            this.lastBorderCenterX = border.getCenterX();
-            this.lastBorderCenterZ = border.getCenterZ();
+            this.toSchedule = ChunkForceLoader.scan(level, new ChunkPos(center), radiusInChunks, chunkDataCache);
+            this.pendingChunkLoads = new LinkedHashSet<>();
         }
+
+        if (this.toSchedule != null) {
+            if (!this.toSchedule.isEmpty() && !close) {
+                ChunkForceLoader.addTicketBatch(level, toSchedule, pendingChunkLoads, TICKET_BATCH_PER_TICK);
+            }
+
+            if (close && (!toSchedule.isEmpty() || !pendingChunkLoads.isEmpty())) {
+                ChunkForceLoader.addAndForceLoadRemaining(level, toSchedule, pendingChunkLoads, chunkDataCache);
+            } else if (!toSchedule.isEmpty() || !pendingChunkLoads.isEmpty()) {
+                ChunkForceLoader.checkProgress(level, pendingChunkLoads, chunkDataCache);
+                if (!toSchedule.isEmpty() || !pendingChunkLoads.isEmpty()) return;
+            }
+
+            this.completeInitialSnapshot(level);
+        }
+
+        if (close) this.closeForWriting = true;
+        if (this.isPaused) this.wasPaused = true;
 
         this.flushPendingPackets();
 
@@ -420,12 +434,25 @@ public class ServerRecorder {
         if (!this.isPaused) this.wasPaused = false;
     }
 
-    private void forceLoadAndCacheChunks(ServerLevel level) {
-        ChunkPos cc = new ChunkPos(center);
-        var packets = ChunkForceLoader.forceLoadAndCreatePackets(level, cc, radiusInChunks);
-        for (var entry : packets.entrySet()) {
-            chunkDataCache.cacheChunkPacket(entry.getKey(), entry.getValue());
+    private void completeInitialSnapshot(ServerLevel level) {
+        // pendingChunkLoads should be empty here; clean up any stragglers defensively.
+        if (pendingChunkLoads != null && !pendingChunkLoads.isEmpty()) {
+            ChunkForceLoader.removeTickets(level, pendingChunkLoads);
         }
+        this.toSchedule = null;
+        this.pendingChunkLoads = null;
+
+        pendingGamePackets.clear();
+
+        this.writeSnapshot(level, true);
+
+        this.lastRaining = level.isRaining();
+        this.lastRainLevel = level.getRainLevel(1.0f);
+        this.lastThunderLevel = level.getThunderLevel(1.0f);
+        WorldBorder border = level.getWorldBorder();
+        this.lastBorderSize = border.getSize();
+        this.lastBorderCenterX = border.getCenterX();
+        this.lastBorderCenterZ = border.getCenterZ();
     }
 
     private void flushPendingPackets() {
@@ -829,6 +856,12 @@ public class ServerRecorder {
     }
 
     public String getDebugString() {
+        int scheduling = toSchedule != null ? toSchedule.size() : 0;
+        int loading = pendingChunkLoads != null ? pendingChunkLoads.size() : 0;
+        if (scheduling + loading > 0) {
+            return String.format("[ServerFlashback] '%s' Loading chunks: %d scheduling, %d loading",
+                    metadata.worldName, scheduling, loading);
+        }
         return String.format("[ServerFlashback] '%s' T:%d S:%d(%d/%d)",
                 metadata.worldName, writtenTicks, metadata.chunks.size(),
                 writtenTicksInChunk, CHUNK_LENGTH_SECONDS * 20);

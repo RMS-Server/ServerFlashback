@@ -24,6 +24,9 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 
 public class RecordingManager {
 
@@ -31,6 +34,7 @@ public class RecordingManager {
     private static final RecordingManager INSTANCE = new RecordingManager();
 
     private final Map<String, ServerRecorder> activeRecordings = new ConcurrentHashMap<>();
+    private final List<Future<?>> pendingExports = new CopyOnWriteArrayList<>();
     private static boolean blockEventInProgress = false;
 
     private RecordingManager() {}
@@ -67,24 +71,48 @@ public class RecordingManager {
         if (recorder == null) return false;
 
         recorder.endTick(true);
-        Path recordFolder = recorder.finish();
 
 //#if MC >= 12005
         Path replayDir = server.getServerDirectory().resolve("serverflashback").resolve("replays");
 //#else
 //$$         Path replayDir = server.getServerDirectory().toPath().resolve("serverflashback").resolve("replays");
 //#endif
-        try {
-            Files.createDirectories(replayDir);
-        } catch (Exception e) {
-            LOGGER.error("Failed to create replay directory", e);
-        }
-
         String filename = name.replaceAll("[^a-zA-Z0-9._-]", "_") + ".zip";
         Path outputFile = replayDir.resolve(filename);
-        ReplayExporter.export(recordFolder, outputFile, name);
-        LOGGER.info("Stopped recording '{}', exported to {}", name, outputFile);
+
+        // finish() busy-waits for the writer thread, and export() does ZIP I/O.
+        // Both must run off the main thread to avoid watchdog kills.
+        FutureTask<Void> task = new FutureTask<>(() -> {
+            try {
+                Files.createDirectories(replayDir);
+            } catch (Exception e) {
+                LOGGER.error("Failed to create replay directory", e);
+            }
+            Path recordFolder = recorder.finish();
+            ReplayExporter.export(recordFolder, outputFile, name);
+            LOGGER.info("Stopped recording '{}', exported to {}", name, outputFile);
+            return null;
+        });
+        pendingExports.add(task);
+        Thread exportThread = new Thread(task, "ServerFlashback-Export-" + name);
+        exportThread.setDaemon(false);
+        exportThread.start();
         return true;
+    }
+
+    /** Block until all in-flight export threads finish. Called on server shutdown. */
+    public void waitForPendingExports() {
+        for (Future<?> f : pendingExports) {
+            try {
+                if (!f.isDone()) {
+                    LOGGER.info("Waiting for in-flight replay export to finish...");
+                }
+                f.get(); // immediate for already-done futures; also re-throws any stored exception
+            } catch (Exception e) {
+                LOGGER.error("Export thread failed", e);
+            }
+        }
+        pendingExports.clear();
     }
 
     public boolean pauseRecording(String name) {

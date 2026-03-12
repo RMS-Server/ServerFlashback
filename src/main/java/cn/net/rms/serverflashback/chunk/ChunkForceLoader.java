@@ -2,50 +2,140 @@ package cn.net.rms.serverflashback.chunk;
 
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 public class ChunkForceLoader {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("serverflashback");
 
-    public static Map<ChunkPos, ClientboundLevelChunkWithLightPacket> forceLoadAndCreatePackets(
-            ServerLevel level, ChunkPos center, int radiusInChunks) {
+    /** Tickets use margin=0 → level 33 = FULL, weakest level that yields a LevelChunk. */
+    public static final TicketType<ChunkPos> RECORDING_TICKET =
+            TicketType.create("serverflashback", Comparator.comparingLong(ChunkPos::toLong));
 
-        Map<ChunkPos, ClientboundLevelChunkWithLightPacket> result = new HashMap<>();
+    /**
+     * Phase 1: scan all chunks in the recording area.
+     * Already-loaded chunks are cached immediately.
+     * Returns a mutable list of positions that still need a ticket + loading.
+     * No tickets are added here — call addTicketBatch() per tick to spread the load.
+     */
+    public static List<ChunkPos> scan(
+            ServerLevel level, ChunkPos center, int radiusInChunks, ChunkDataCache cache) {
+
+        List<ChunkPos> toSchedule = new ArrayList<>();
+        int alreadyLoaded = 0;
         int total = (2 * radiusInChunks + 1) * (2 * radiusInChunks + 1);
-        int loaded = 0;
-
-        LOGGER.info("Force-loading {} chunks (center: {}, radius: {})", total, center, radiusInChunks);
 
         for (int dx = -radiusInChunks; dx <= radiusInChunks; dx++) {
             for (int dz = -radiusInChunks; dz <= radiusInChunks; dz++) {
                 ChunkPos pos = new ChunkPos(center.x + dx, center.z + dz);
-                try {
-                    LevelChunk chunk = level.getChunk(pos.x, pos.z);
-//#if MC >= 11800
-                    ClientboundLevelChunkWithLightPacket packet =
-                            new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null);
-//#else
-//$$ ClientboundLevelChunkPacket packet = new ClientboundLevelChunkPacket(chunk);
-//#endif
-                    result.put(pos, packet);
-                    loaded++;
-                    if (loaded % 200 == 0) {
-                        LOGGER.info("Force-loaded {}/{} chunks...", loaded, total);
+                LevelChunk chunk = level.getChunkSource().getChunkNow(pos.x, pos.z);
+                if (chunk != null) {
+                    try {
+                        cache.cacheChunkPacket(pos, createPacket(chunk, level));
+                        alreadyLoaded++;
+                    } catch (Exception e) {
+                        LOGGER.warn("Failed to cache loaded chunk {}: {}", pos, e.getMessage());
                     }
-                } catch (Exception e) {
-                    LOGGER.warn("Failed to load chunk {}: {}", pos, e.getMessage());
+                } else {
+                    toSchedule.add(pos);
                 }
             }
         }
 
-        LOGGER.info("Force-loading complete: {}/{} chunks", loaded, total);
-        return result;
+        LOGGER.info("Chunk loading: {} already loaded, {} queued for async loading (total: {})",
+                alreadyLoaded, toSchedule.size(), total);
+        return toSchedule;
+    }
+
+    /**
+     * Phase 2 (called each tick): pop up to batchSize positions from toSchedule,
+     * add a ticket for each, and move them into the pending set.
+     */
+    public static void addTicketBatch(
+            ServerLevel level, List<ChunkPos> toSchedule, Set<ChunkPos> pending, int batchSize) {
+
+        int count = Math.min(batchSize, toSchedule.size());
+        for (int i = 0; i < count; i++) {
+            ChunkPos pos = toSchedule.remove(toSchedule.size() - 1);
+            level.getChunkSource().addRegionTicket(RECORDING_TICKET, pos, 0, pos);
+            pending.add(pos);
+        }
+    }
+
+    /**
+     * Shutdown path: add remaining tickets and immediately force-load synchronously.
+     */
+    public static void addAndForceLoadRemaining(
+            ServerLevel level, List<ChunkPos> toSchedule, Set<ChunkPos> pending, ChunkDataCache cache) {
+
+        for (ChunkPos pos : toSchedule) {
+            level.getChunkSource().addRegionTicket(RECORDING_TICKET, pos, 0, pos);
+            pending.add(pos);
+        }
+        toSchedule.clear();
+
+        if (pending.isEmpty()) return;
+        LOGGER.info("Force-loading {} chunks synchronously (shutdown)...", pending.size());
+        Iterator<ChunkPos> it = pending.iterator();
+        while (it.hasNext()) {
+            ChunkPos pos = it.next();
+            try {
+                LevelChunk chunk = level.getChunk(pos.x, pos.z);
+                cache.cacheChunkPacket(pos, createPacket(chunk, level));
+            } catch (Exception e) {
+                LOGGER.warn("Failed to force-load chunk {}: {}", pos, e.getMessage());
+            }
+            level.getChunkSource().removeRegionTicket(RECORDING_TICKET, pos, 0, pos);
+            it.remove();
+        }
+    }
+
+    /**
+     * Phase 2 poll (called each tick): cache any pending chunks that have finished loading,
+     * removing their ticket immediately to spread unload pressure over time.
+     *
+     * @return true when all pending chunks are cached
+     */
+    public static boolean checkProgress(
+            ServerLevel level, Set<ChunkPos> pending, ChunkDataCache cache) {
+
+        Iterator<ChunkPos> it = pending.iterator();
+        while (it.hasNext()) {
+            ChunkPos pos = it.next();
+            LevelChunk chunk = level.getChunkSource().getChunkNow(pos.x, pos.z);
+            if (chunk != null) {
+                try {
+                    cache.cacheChunkPacket(pos, createPacket(chunk, level));
+                } catch (Exception e) {
+                    LOGGER.warn("Failed to cache async-loaded chunk {}: {}", pos, e.getMessage());
+                }
+                level.getChunkSource().removeRegionTicket(RECORDING_TICKET, pos, 0, pos);
+                it.remove();
+            }
+        }
+        return pending.isEmpty();
+    }
+
+    /**
+     * Error/abort cleanup: remove tickets for any positions still in the pending set.
+     */
+    public static void removeTickets(ServerLevel level, Collection<ChunkPos> positions) {
+        for (ChunkPos pos : positions) {
+            level.getChunkSource().removeRegionTicket(RECORDING_TICKET, pos, 0, pos);
+        }
+    }
+
+    static ClientboundLevelChunkWithLightPacket createPacket(LevelChunk chunk, ServerLevel level) {
+//#if MC >= 11800
+        return new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null);
+//#else
+//$$ return new ClientboundLevelChunkPacket(chunk);
+//#endif
     }
 }

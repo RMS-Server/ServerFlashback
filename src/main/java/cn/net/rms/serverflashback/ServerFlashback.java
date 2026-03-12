@@ -55,6 +55,7 @@ public final class ServerFlashback implements ModInitializer {
                 LOGGER.info("Server stopping, finishing all active recordings...");
                 RecordingManager.getInstance().stopAll(server);
             }
+            RecordingManager.getInstance().waitForPendingExports();
         });
 
         LOGGER.info("ServerFlashback initialized");
