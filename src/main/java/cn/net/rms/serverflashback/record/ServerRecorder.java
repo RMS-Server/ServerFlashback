@@ -126,6 +126,7 @@ public class ServerRecorder {
 
     private final Map<Integer, Position> lastPositions = new HashMap<>();
     private final Set<Integer> trackedEntityIds = new HashSet<>();
+    private final Set<ChunkPos> pendingRetryChunks = new HashSet<>();
 
     private static final long BLOCK_ENTITY_COOLDOWN_TICKS = 20;
     private final Map<Long, Long> blockEntityUpdateTicks = new HashMap<>();
@@ -365,10 +366,14 @@ public class ServerRecorder {
         }
     }
 
-    public void onChunkLoad(ServerLevel level, ChunkPos pos) {
-        if (isChunkInArea(pos) && level.dimension() == this.dimension) {
-            chunkDataCache.onChunkLoad(pos);
-        }
+    public void onChunkLoad(ServerLevel level, LevelChunk chunk) {
+        ChunkPos pos = chunk.getPos();
+        if (!isChunkInArea(pos) || level.dimension() != this.dimension) return;
+        chunkDataCache.onChunkLoad(pos);
+
+        if (toSchedule != null || closeForWriting || isPaused) return;
+        pendingRetryChunks.remove(pos);
+        sendChunkPacket(level, chunk, pos);
     }
 
     public void endTick(boolean close) {
@@ -405,6 +410,7 @@ public class ServerRecorder {
         if (close) this.closeForWriting = true;
         if (this.isPaused) this.wasPaused = true;
 
+        this.retryPendingChunks(level);
         this.flushPendingPackets();
 
         boolean wroteNewTick = false;
@@ -511,6 +517,7 @@ public class ServerRecorder {
             this.lastPositions.clear();
             this.blockEntityUpdateTicks.clear();
             this.pendingGamePackets.clear();
+            this.pendingRetryChunks.clear();
             this.chunkDataCache.clear();
             this.wasPaused = false;
             this.finishedPausing = false;
@@ -547,19 +554,42 @@ public class ServerRecorder {
             if (!oldChunks.contains(cp)) {
                 LevelChunk loaded = level.getChunkSource().getChunkNow(cp.x, cp.z);
                 if (loaded != null) {
-                    try {
-//#if MC >= 11800
-                        ClientboundLevelChunkWithLightPacket pkt =
-                                new ClientboundLevelChunkWithLightPacket(loaded, level.getLightEngine(), null, null);
-//#else
-//$$ ClientboundLevelChunkPacket pkt = new ClientboundLevelChunkPacket(loaded);
-//#endif
-                        pendingGamePackets.add(pkt);
-                        chunkDataCache.cacheChunkPacket(cp, pkt);
-                    } catch (Exception e) {
-                        LOGGER.warn("Failed to create chunk packet for dynamic load: {}", cp, e);
-                    }
+                    sendChunkPacket(level, loaded, cp);
+                } else {
+                    pendingRetryChunks.add(cp);
                 }
+            }
+        }
+    }
+
+    private void sendChunkPacket(ServerLevel level, LevelChunk chunk, ChunkPos cp) {
+        try {
+//#if MC >= 11800
+            ClientboundLevelChunkWithLightPacket pkt =
+                    new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null);
+//#else
+//$$ ClientboundLevelChunkPacket pkt = new ClientboundLevelChunkPacket(chunk);
+//#endif
+            pendingGamePackets.add(pkt);
+            chunkDataCache.cacheChunkPacket(cp, pkt);
+        } catch (Exception e) {
+            LOGGER.warn("Failed to create chunk packet: {}", cp, e);
+        }
+    }
+
+    private void retryPendingChunks(ServerLevel level) {
+        if (pendingRetryChunks.isEmpty()) return;
+        Iterator<ChunkPos> it = pendingRetryChunks.iterator();
+        while (it.hasNext()) {
+            ChunkPos cp = it.next();
+            if (!isChunkInArea(cp)) {
+                it.remove();
+                continue;
+            }
+            LevelChunk loaded = level.getChunkSource().getChunkNow(cp.x, cp.z);
+            if (loaded != null) {
+                sendChunkPacket(level, loaded, cp);
+                it.remove();
             }
         }
     }
@@ -595,6 +625,7 @@ public class ServerRecorder {
         ChunkForceLoader.repairMissingChunks(level, new ChunkPos(center), radiusInChunks, chunkDataCache);
 
         pendingGamePackets.clear();
+        pendingRetryChunks.clear();
 
         this.writeSnapshot(level, true);
 

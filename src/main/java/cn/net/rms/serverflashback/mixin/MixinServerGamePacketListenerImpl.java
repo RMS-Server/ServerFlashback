@@ -41,19 +41,33 @@ public class MixinServerGamePacketListenerImpl {
     @SuppressWarnings("unchecked")
     @Inject(method = "send(Lnet/minecraft/network/protocol/Packet;)V", at = @At("HEAD"))
     private void serverflashback$onSend(Packet<?> packet, CallbackInfo ci) {
-        if (!CAPTURED_PACKETS.contains(packet.getClass())) return;
         if (!RecordingManager.getInstance().hasActiveRecordings()) return;
+
 //#if MC >= 12002
         if (!((Object) this instanceof ServerGamePacketListenerImpl gameListener)) return;
-        ServerLevel level = (ServerLevel) gameListener.player.level();
-        RecordingManager.getInstance().onPositionedGamePacket(
-                level, gameListener.player.getX(), gameListener.player.getZ(),
-                (Packet<? super ClientGamePacketListener>) packet);
+        ServerPlayer sfb$p = gameListener.player;
 //#else
-//$$         ServerLevel level = (ServerLevel) this.player.level;
-//$$         RecordingManager.getInstance().onPositionedGamePacket(
-//$$                 level, this.player.getX(), this.player.getZ(),
-//$$                 (Packet<? super ClientGamePacketListener>) packet);
+//$$         ServerPlayer sfb$p = this.player;
 //#endif
+
+//#if MC >= 11800
+        if (packet instanceof ClientboundLevelChunkWithLightPacket) {
+//#else
+//$$         if (packet instanceof ClientboundLevelChunkPacket) {
+//#endif
+            RecordingManager.getInstance().onFollowedPlayerChunkPacket(
+                    sfb$p, (Packet<? super ClientGamePacketListener>) packet);
+            return;
+        }
+
+        if (!CAPTURED_PACKETS.contains(packet.getClass())) return;
+//#if MC >= 12002
+        ServerLevel level = (ServerLevel) sfb$p.level();
+//#else
+//$$         ServerLevel level = (ServerLevel) sfb$p.level;
+//#endif
+        RecordingManager.getInstance().onPositionedGamePacket(
+                level, sfb$p.getX(), sfb$p.getZ(),
+                (Packet<? super ClientGamePacketListener>) packet);
     }
 }

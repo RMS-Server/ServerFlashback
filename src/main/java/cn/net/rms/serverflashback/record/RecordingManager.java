@@ -256,7 +256,7 @@ public class RecordingManager {
 
     public void onChunkLoad(ServerLevel level, LevelChunk chunk) {
         for (ServerRecorder recorder : activeRecordings.values()) {
-            recorder.onChunkLoad(level, chunk.getPos());
+            recorder.onChunkLoad(level, chunk);
         }
     }
 
@@ -273,6 +273,15 @@ public class RecordingManager {
         for (ServerRecorder recorder : activeRecordings.values()) {
             if (recorder.isInArea(pos, level.dimension())) {
                 recorder.queueBlockEntityUpdate(level, pos);
+            }
+        }
+    }
+
+    public void onFollowedPlayerChunkPacket(ServerPlayer player, Packet<? super ClientGamePacketListener> packet) {
+        UUID playerUuid = player.getUUID();
+        for (ServerRecorder recorder : activeRecordings.values()) {
+            if (playerUuid.equals(recorder.getFollowedPlayerUuid())) {
+                recorder.queueGamePacket(packet);
             }
         }
     }
