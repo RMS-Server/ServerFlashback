@@ -9,6 +9,7 @@ import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.protocol.game.ClientboundEntityEventPacket;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
@@ -63,6 +64,22 @@ public class RecordingManager {
         activeRecordings.put(name, recorder);
         LOGGER.info("Started recording '{}' at ({}, {}, {}) radius={} in {}",
                 name, center.getX(), center.getY(), center.getZ(), radius, level.dimension().location());
+        return name;
+    }
+
+    public String startFollowRecording(MinecraftServer server, ServerPlayer player, String name) {
+        if (name == null || name.isEmpty()) {
+            name = "follow_" + player.getGameProfile().getName() + "_" +
+                    LocalDateTime.now().withNano(0).toString();
+        }
+        if (activeRecordings.containsKey(name)) {
+            return null;
+        }
+
+        ServerRecorder recorder = ServerRecorder.createFollowRecorder(server, player, name);
+        activeRecordings.put(name, recorder);
+        LOGGER.info("Started follow recording '{}' tracking player {} ({})",
+                name, player.getGameProfile().getName(), player.getUUID());
         return name;
     }
 

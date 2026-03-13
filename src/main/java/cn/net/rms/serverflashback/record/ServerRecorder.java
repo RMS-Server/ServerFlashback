@@ -40,6 +40,7 @@ import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 //#if MC >= 12002
@@ -98,12 +99,16 @@ public class ServerRecorder {
     private final StreamCodec<ByteBuf, Packet<? super ClientGamePacketListener>> gamePacketCodec;
 //#endif
 
-    private final BlockPos center;
-    private final int radiusInBlocks;
-    private final int radiusInChunks;
-    private final ResourceKey<Level> dimension;
+    private BlockPos center;
+    private int radiusInBlocks;
+    private int radiusInChunks;
+    private ResourceKey<Level> dimension;
     private final MinecraftServer server;
     private final RegistryAccess registryAccess;
+
+    private UUID followedPlayerUuid;
+    private ChunkPos lastPlayerChunkPos;
+    private boolean followAutoPaused;
 
     private int writtenTicksInChunk = 0;
     private int writtenTicks = 0;
@@ -133,6 +138,8 @@ public class ServerRecorder {
     private volatile boolean closeForWriting = false;
     private volatile boolean needsInitialSnapshot = true;
     private boolean finishedPausing = false;
+    // Set when a dimension change occurs so the next chunk's snapshot is force-played by the client.
+    private boolean pendingForceSnapshot = false;
 
     // Chunk loading is split into two stages to avoid a single-tick ticket registration spike.
     // toSchedule: positions not yet ticketed (drained TICKET_BATCH_PER_TICK per tick)
@@ -179,6 +186,19 @@ public class ServerRecorder {
         this.metadata.worldName = name;
     }
 
+    public static ServerRecorder createFollowRecorder(MinecraftServer server, ServerPlayer player, String name) {
+//#if MC >= 12005
+        ServerLevel level = player.serverLevel();
+//#else
+//$$ ServerLevel level = (ServerLevel) player.level;
+//#endif
+        int viewDist = server.getPlayerList().getViewDistance();
+        ServerRecorder recorder = new ServerRecorder(server, level, player.blockPosition(), viewDist * 16, name);
+        recorder.followedPlayerUuid = player.getUUID();
+        recorder.lastPlayerChunkPos = new ChunkPos(player.blockPosition());
+        return recorder;
+    }
+
     public boolean isInArea(BlockPos pos, ResourceKey<Level> dim) {
         if (dim != this.dimension) return false;
         return Math.abs(pos.getX() - center.getX()) <= radiusInBlocks
@@ -202,6 +222,7 @@ public class ServerRecorder {
     public int getWrittenTicks() { return writtenTicks; }
     public BlockPos getCenter() { return center; }
     public int getRadiusInBlocks() { return radiusInBlocks; }
+    public UUID getFollowedPlayerUuid() { return followedPlayerUuid; }
 
     public void addMarker(ReplayMarker marker) {
         this.metadata.replayMarkers.put(this.writtenTicks, marker);
@@ -353,6 +374,10 @@ public class ServerRecorder {
     public void endTick(boolean close) {
         if (this.closeForWriting) return;
 
+        if (this.followedPlayerUuid != null && !updateFollowedPlayerTracking()) {
+            return;
+        }
+
         ServerLevel level = server.getLevel(this.dimension);
         if (level == null) return;
 
@@ -413,6 +438,10 @@ public class ServerRecorder {
 
             var chunkMeta = new FlashbackChunkMeta();
             chunkMeta.duration = this.writtenTicksInChunk;
+            if (this.pendingForceSnapshot) {
+                chunkMeta.forcePlaySnapshot = true;
+                this.pendingForceSnapshot = false;
+            }
             this.metadata.chunks.put(chunkName, chunkMeta);
             this.metadata.totalTicks = this.writtenTicks;
 
@@ -432,6 +461,127 @@ public class ServerRecorder {
         }
 
         if (!this.isPaused) this.wasPaused = false;
+    }
+
+    private boolean updateFollowedPlayerTracking() {
+        ServerPlayer player = server.getPlayerList().getPlayer(followedPlayerUuid);
+        if (player == null) {
+            if (!isPaused) {
+                setPaused(true);
+                followAutoPaused = true;
+            }
+            return false;
+        }
+
+        if (followAutoPaused) {
+            setPaused(false);
+            this.wasPaused = true;
+            followAutoPaused = false;
+        }
+
+//#if MC >= 12005
+        ServerLevel playerLevel = player.serverLevel();
+//#else
+//$$ ServerLevel playerLevel = (ServerLevel) player.level;
+//#endif
+        ResourceKey<Level> playerDim = playerLevel.dimension();
+        BlockPos playerPos = player.blockPosition();
+        ChunkPos playerChunk = new ChunkPos(playerPos);
+        int viewDist = server.getPlayerList().getViewDistance();
+        int newRadiusInBlocks = viewDist * 16;
+        int newRadiusInChunks = (newRadiusInBlocks >> 4) + 1;
+
+        if (playerDim != this.dimension) {
+            if (this.writtenTicks > 0) {
+                flushCurrentReplayChunk();
+            }
+
+            ServerLevel oldLevel = server.getLevel(this.dimension);
+            if (oldLevel != null && this.pendingChunkLoads != null && !this.pendingChunkLoads.isEmpty()) {
+                ChunkForceLoader.removeTickets(oldLevel, this.pendingChunkLoads);
+            }
+            this.toSchedule = null;
+            this.pendingChunkLoads = null;
+
+            this.dimension = playerDim;
+            this.needsInitialSnapshot = true;
+            // The next chunk's snapshot switches dimensions; client must play it during linear playback.
+            this.pendingForceSnapshot = true;
+            this.trackedEntityIds.clear();
+            this.lastPositions.clear();
+            this.blockEntityUpdateTicks.clear();
+            this.pendingGamePackets.clear();
+            this.chunkDataCache.clear();
+            this.wasPaused = false;
+            this.finishedPausing = false;
+        } else if (lastPlayerChunkPos != null && !playerChunk.equals(lastPlayerChunkPos)) {
+            updateDynamicChunks(lastPlayerChunkPos, playerChunk, radiusInChunks, newRadiusInChunks, playerLevel);
+        }
+
+        this.center = playerPos;
+        this.radiusInBlocks = newRadiusInBlocks;
+        this.radiusInChunks = newRadiusInChunks;
+        this.lastPlayerChunkPos = playerChunk;
+        return true;
+    }
+
+    private void updateDynamicChunks(ChunkPos oldCenter, ChunkPos newCenter,
+                                     int oldRadius, int newRadius, ServerLevel level) {
+        Set<ChunkPos> oldChunks = new HashSet<>();
+        for (int dx = -oldRadius; dx <= oldRadius; dx++) {
+            for (int dz = -oldRadius; dz <= oldRadius; dz++) {
+                oldChunks.add(new ChunkPos(oldCenter.x + dx, oldCenter.z + dz));
+            }
+        }
+        Set<ChunkPos> newChunks = new HashSet<>();
+        for (int dx = -newRadius; dx <= newRadius; dx++) {
+            for (int dz = -newRadius; dz <= newRadius; dz++) {
+                newChunks.add(new ChunkPos(newCenter.x + dx, newCenter.z + dz));
+            }
+        }
+
+        // ClientboundForgetLevelChunkPacket is not supported by ReplayGamePacketHandler (throws UnsupportedPacketException),
+        // so old out-of-range chunks are simply left in the replay world rather than explicitly unloaded.
+
+        for (ChunkPos cp : newChunks) {
+            if (!oldChunks.contains(cp)) {
+                LevelChunk loaded = level.getChunkSource().getChunkNow(cp.x, cp.z);
+                if (loaded != null) {
+                    try {
+//#if MC >= 11800
+                        ClientboundLevelChunkWithLightPacket pkt =
+                                new ClientboundLevelChunkWithLightPacket(loaded, level.getLightEngine(), null, null);
+//#else
+//$$ ClientboundLevelChunkPacket pkt = new ClientboundLevelChunkPacket(loaded);
+//#endif
+                        pendingGamePackets.add(pkt);
+                        chunkDataCache.cacheChunkPacket(cp, pkt);
+                    } catch (Exception e) {
+                        LOGGER.warn("Failed to create chunk packet for dynamic load: {}", cp, e);
+                    }
+                }
+            }
+        }
+    }
+
+    private void flushCurrentReplayChunk() {
+        if (this.writtenTicksInChunk == 0) {
+            this.asyncReplaySaver.submit(writer -> writer.startAndFinishAction(ActionNextTick.INSTANCE));
+            this.writtenTicksInChunk = 1;
+            this.writtenTicks += 1;
+        }
+        int chunkId = this.metadata.chunks.size();
+        String chunkName = "c" + chunkId + ".flashback";
+        var chunkMeta = new FlashbackChunkMeta();
+        chunkMeta.duration = this.writtenTicksInChunk;
+        if (this.pendingForceSnapshot) {
+            chunkMeta.forcePlaySnapshot = true;
+            this.pendingForceSnapshot = false;
+        }
+        this.metadata.chunks.put(chunkName, chunkMeta);
+        this.metadata.totalTicks = this.writtenTicks;
+        this.asyncReplaySaver.writeReplayChunk(chunkName, GSON.toJson(this.metadata.toJson()));
+        this.writtenTicksInChunk = 0;
     }
 
     private void completeInitialSnapshot(ServerLevel level) {
@@ -858,14 +1008,20 @@ public class ServerRecorder {
     }
 
     public String getDebugString() {
+        String followInfo = "";
+        if (followedPlayerUuid != null) {
+            ServerPlayer player = server.getPlayerList().getPlayer(followedPlayerUuid);
+            String playerName = player != null ? player.getGameProfile().getName() : "offline";
+            followInfo = " following=" + playerName;
+        }
         int scheduling = toSchedule != null ? toSchedule.size() : 0;
         int loading = pendingChunkLoads != null ? pendingChunkLoads.size() : 0;
         if (scheduling + loading > 0) {
-            return String.format("[ServerFlashback] '%s' Loading chunks: %d scheduling, %d loading",
-                    metadata.worldName, scheduling, loading);
+            return String.format("[ServerFlashback] '%s'%s Loading chunks: %d scheduling, %d loading",
+                    metadata.worldName, followInfo, scheduling, loading);
         }
-        return String.format("[ServerFlashback] '%s' T:%d S:%d(%d/%d)",
-                metadata.worldName, writtenTicks, metadata.chunks.size(),
+        return String.format("[ServerFlashback] '%s'%s T:%d S:%d(%d/%d)",
+                metadata.worldName, followInfo, writtenTicks, metadata.chunks.size(),
                 writtenTicksInChunk, CHUNK_LENGTH_SECONDS * 20);
     }
 }

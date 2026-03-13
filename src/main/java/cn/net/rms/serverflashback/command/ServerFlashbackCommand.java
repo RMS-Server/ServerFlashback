@@ -9,6 +9,7 @@ import cn.net.rms.serverflashback.record.RecordingManager;
 import cn.net.rms.serverflashback.record.ReplayMarker;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -16,6 +17,7 @@ import net.minecraft.network.chat.Component;
 //$$ import net.minecraft.network.chat.TextComponent;
 //#endif
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 //#if MC >= 11903
 import org.joml.Vector3f;
 //#else
@@ -52,6 +54,13 @@ public class ServerFlashbackCommand {
                                 .then(Commands.argument("name", StringArgumentType.string())
                                         .executes(ctx -> startRecording(ctx,
                                                 StringArgumentType.getString(ctx, "name")))))));
+
+        root.then(Commands.literal("follow")
+                .then(Commands.argument("player", EntityArgument.player())
+                        .executes(ctx -> startFollowRecording(ctx, null))
+                        .then(Commands.argument("name", StringArgumentType.string())
+                                .executes(ctx -> startFollowRecording(ctx,
+                                        StringArgumentType.getString(ctx, "name"))))));
 
         root.then(Commands.literal("stop")
                 .executes(ctx -> stopRecording(ctx, null))
@@ -100,6 +109,24 @@ public class ServerFlashbackCommand {
 
         if (result != null) {
             sendOk(source, text("Started recording '" + result + "' at " + pos.toShortString() + " radius=" + radius), true);
+            return 1;
+        } else {
+            source.sendFailure(text("Recording with name '" + name + "' already exists"));
+            return 0;
+        }
+    }
+
+    private static int startFollowRecording(CommandContext<CommandSourceStack> ctx, String name)
+            throws CommandSyntaxException {
+        CommandSourceStack source = ctx.getSource();
+        ServerPlayer player = EntityArgument.getPlayer(ctx, "player");
+
+        String result = RecordingManager.getInstance().startFollowRecording(
+                source.getServer(), player, name);
+
+        if (result != null) {
+            sendOk(source, text("Started follow recording '" + result + "' tracking " +
+                    player.getGameProfile().getName()), true);
             return 1;
         } else {
             source.sendFailure(text("Recording with name '" + name + "' already exists"));
