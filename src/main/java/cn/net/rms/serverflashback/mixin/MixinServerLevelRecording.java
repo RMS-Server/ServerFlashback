@@ -100,7 +100,7 @@ public class MixinServerLevelRecording {
                                                  int count, double xDist, double yDist, double zDist,
                                                  double speed, CallbackInfoReturnable<Integer> cir) {
         if (RecordingManager.getInstance().hasActiveRecordings()) {
-//#if MC >= 11900
+//#if MC >= 12104
             ClientboundLevelParticlesPacket packet = new ClientboundLevelParticlesPacket(
                     particle, false, false, x, y, z, (float) xDist, (float) yDist, (float) zDist, (float) speed, count);
 //#else
@@ -122,7 +122,7 @@ public class MixinServerLevelRecording {
         }
     }
 
-//#if MC >= 12002
+//#if MC >= 12104
     @Inject(method = "explode(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/damagesource/DamageSource;Lnet/minecraft/world/level/ExplosionDamageCalculator;DDDFZLnet/minecraft/world/level/Level$ExplosionInteraction;Lnet/minecraft/core/particles/ParticleOptions;Lnet/minecraft/core/particles/ParticleOptions;Lnet/minecraft/core/Holder;)V",
             at = @At("HEAD"))
     private void serverflashback$onExplode(Entity source,
@@ -139,6 +139,24 @@ public class MixinServerLevelRecording {
                     (ServerLevel) (Object) this, x, z, packet);
         }
     }
+//#elseif MC >= 12002
+//$$     @Inject(method = "explode(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/damagesource/DamageSource;Lnet/minecraft/world/level/ExplosionDamageCalculator;DDDFZLnet/minecraft/world/level/Level$ExplosionInteraction;Lnet/minecraft/core/particles/ParticleOptions;Lnet/minecraft/core/particles/ParticleOptions;Lnet/minecraft/core/Holder;)Lnet/minecraft/world/level/Explosion;",
+//$$             at = @At("HEAD"))
+//$$     private void serverflashback$onExplode(Entity source,
+//$$                                            net.minecraft.world.damagesource.DamageSource damageSource,
+//$$                                            net.minecraft.world.level.ExplosionDamageCalculator calculator,
+//$$                                            double x, double y, double z, float radius, boolean fire,
+//$$                                            net.minecraft.world.level.Level.ExplosionInteraction interaction,
+//$$                                            ParticleOptions smallParticles, ParticleOptions largeParticles,
+//$$                                            Holder<SoundEvent> sound, CallbackInfoReturnable<net.minecraft.world.level.Explosion> cir) {
+//$$         if (RecordingManager.getInstance().hasActiveRecordings()) {
+//$$             ClientboundExplodePacket packet = new ClientboundExplodePacket(
+//$$                     x, y, z, radius, java.util.Collections.emptyList(), Vec3.ZERO,
+//$$                     net.minecraft.world.level.Explosion.BlockInteraction.KEEP, smallParticles, largeParticles, sound);
+//$$             RecordingManager.getInstance().onPositionedGamePacket(
+//$$                     (ServerLevel) (Object) this, x, z, packet);
+//$$         }
+//$$     }
 //#else
 //$$     @Inject(method = "explode(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/damagesource/DamageSource;Lnet/minecraft/world/level/ExplosionDamageCalculator;DDDFZLnet/minecraft/world/level/Explosion$BlockInteraction;)Lnet/minecraft/world/level/Explosion;",
 //$$             at = @At("HEAD"))

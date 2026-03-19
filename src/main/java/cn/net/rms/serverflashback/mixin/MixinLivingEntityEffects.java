@@ -8,9 +8,8 @@ import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-//#if MC >= 12005
+//#if MC >= 12104
 import java.util.Collection;
-import net.minecraft.core.Holder;
 //#endif
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -60,7 +59,7 @@ public class MixinLivingEntityEffects {
         }
     }
 
-//#if MC >= 12005
+//#if MC >= 12104
     @Inject(method = "onEffectsRemoved", at = @At("RETURN"))
     private void serverflashback$onEffectRemoved(Collection<MobEffectInstance> effects, CallbackInfo ci) {
         Entity self = (Entity) (Object) this;
@@ -74,6 +73,18 @@ public class MixinLivingEntityEffects {
             }
         }
     }
+//#elseif MC >= 12005
+//$$     @Inject(method = "onEffectRemoved", at = @At("RETURN"))
+//$$     private void serverflashback$onEffectRemoved(MobEffectInstance effect, CallbackInfo ci) {
+//$$         Entity self = (Entity) (Object) this;
+//$$         if (self.level() instanceof ServerLevel serverLevel
+//$$                 && RecordingManager.getInstance().hasActiveRecordings()) {
+//$$             ClientboundRemoveMobEffectPacket packet = new ClientboundRemoveMobEffectPacket(
+//$$                     self.getId(), effect.getEffect());
+//$$             RecordingManager.getInstance().onPositionedGamePacket(
+//$$                     serverLevel, self.getX(), self.getZ(), packet);
+//$$         }
+//$$     }
 //#else
 //$$     @Inject(method = "onEffectRemoved", at = @At("RETURN"))
 //$$     private void serverflashback$onEffectRemoved(MobEffectInstance effect, CallbackInfo ci) {

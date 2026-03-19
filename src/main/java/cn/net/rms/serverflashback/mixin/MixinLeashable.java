@@ -23,7 +23,11 @@ public interface MixinLeashable {
 //#endif
 
 //#if MC >= 12005
+    //#if MC >= 12104
     @Inject(method = "setLeashedTo", at = @At("RETURN"))
+    //#else
+    //$$ @Inject(method = "setLeashedTo(Lnet/minecraft/world/entity/Entity;Z)V", at = @At("RETURN"))
+    //#endif
     private void serverflashback$onSetLeashedTo(Entity leashHolder, boolean broadcast, CallbackInfo ci) {
         if (!broadcast) return;
         Entity self = (Entity) (Object) this;
@@ -35,7 +39,11 @@ public interface MixinLeashable {
         }
     }
 
+    //#if MC >= 12104
     @Inject(method = "dropLeash", at = @At("HEAD"))
+    //#else
+    //$$ @Inject(method = "dropLeash()V", at = @At("HEAD"))
+    //#endif
     private void serverflashback$onDropLeash(CallbackInfo ci) {
         Entity self = (Entity) (Object) this;
         if (self.level() instanceof ServerLevel serverLevel

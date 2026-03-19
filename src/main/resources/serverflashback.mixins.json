@@ -11,6 +11,7 @@
     "MixinServerBossEvent",
     "MixinServerChunkCache",
     "MixinServerGamePacketListenerImpl",
+    "MixinLevelChunk",
     "MixinServerLevel",
     "MixinServerLevelEntityEvent",
     "MixinServerLevelRecording"

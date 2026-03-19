@@ -782,10 +782,17 @@ public class ServerRecorder {
 
         long hashedSeed = level.getSeed();
 //#if MC >= 12005
+//#if MC >= 12104
         CommonPlayerSpawnInfo spawnInfo = new CommonPlayerSpawnInfo(
                 level.dimensionTypeRegistration(), level.dimension(), hashedSeed,
                 GameType.SPECTATOR, null, level.isDebug(), level.isFlat(),
                 Optional.empty(), 0, level.getSeaLevel());
+//#else
+//$$         CommonPlayerSpawnInfo spawnInfo = new CommonPlayerSpawnInfo(
+//$$                 level.dimensionTypeRegistration(), level.dimension(), hashedSeed,
+//$$                 GameType.SPECTATOR, GameType.SPECTATOR, level.isDebug(), level.isFlat(),
+//$$                 Optional.empty(), 0);
+//#endif
 
         gamePackets.add(new ClientboundLoginPacket(
                 VIRTUAL_PLAYER_ID, level.getLevelData().isHardcore(),

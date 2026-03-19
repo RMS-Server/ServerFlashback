@@ -40,16 +40,16 @@ public class RecordingManager {
 
     private RecordingManager() {}
 
+    public static RecordingManager getInstance() {
+        return INSTANCE;
+    }
+
     public static boolean isBlockEventInProgress() {
         return blockEventInProgress;
     }
 
     public static void setBlockEventInProgress(boolean value) {
         blockEventInProgress = value;
-    }
-
-    public static RecordingManager getInstance() {
-        return INSTANCE;
     }
 
     public String startRecording(MinecraftServer server, ServerLevel level, BlockPos center, int radius, String name) {
