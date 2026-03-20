@@ -41,9 +41,6 @@ public interface MixinLeashable {
 
     //#if MC >= 12104
     @Inject(method = "dropLeash", at = @At("HEAD"))
-    //#else
-    //$$ @Inject(method = "dropLeash()V", at = @At("HEAD"))
-    //#endif
     private void serverflashback$onDropLeash(CallbackInfo ci) {
         Entity self = (Entity) (Object) this;
         if (self.level() instanceof ServerLevel serverLevel
@@ -53,6 +50,19 @@ public interface MixinLeashable {
                     serverLevel, self.getX(), self.getZ(), packet);
         }
     }
+    //#else
+    //$$ @Inject(method = "dropLeash(ZZ)V", at = @At("HEAD"))
+    //$$ private void serverflashback$onDropLeash(boolean sendPacket, boolean dropItem, CallbackInfo ci) {
+    //$$     if (!sendPacket) return;
+    //$$     Entity self = (Entity) (Object) this;
+    //$$     if (self.level() instanceof ServerLevel serverLevel
+    //$$             && RecordingManager.getInstance().hasActiveRecordings()) {
+    //$$         ClientboundSetEntityLinkPacket packet = new ClientboundSetEntityLinkPacket(self, null);
+    //$$         RecordingManager.getInstance().onPositionedGamePacket(
+    //$$                 serverLevel, self.getX(), self.getZ(), packet);
+    //$$     }
+    //$$ }
+    //#endif
 //#else
 //$$     @Inject(method = "setLeashedTo", at = @At("RETURN"))
 //$$     private void serverflashback$onSetLeashedTo(Entity leashHolder, boolean broadcast, CallbackInfo ci) {
